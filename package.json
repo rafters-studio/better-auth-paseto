@@ -1,0 +1,56 @@
+{
+  "name": "@rafters-studio/better-auth-paseto",
+  "version": "0.1.0",
+  "description": "PASETO v4.public plugin for better-auth. Drop-in replacement for the JWT plugin with no algorithm-confusion attack surface.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "better-auth",
+    "paseto",
+    "auth",
+    "authentication",
+    "token"
+  ],
+  "author": "Rafters Studio",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rafters-studio/better-auth-paseto.git"
+  },
+  "homepage": "https://github.com/rafters-studio/better-auth-paseto",
+  "dependencies": {
+    "paseto-ts": "^1.6.0"
+  },
+  "peerDependencies": {
+    "better-auth": ">=1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "better-auth": "^1.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}
