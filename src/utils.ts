@@ -110,18 +110,25 @@ export function base64UrlDecode(s: string): Uint8Array {
   return out;
 }
 
+/** Encode bytes as base64url (no padding). */
+export function base64UrlEncode(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 /**
- * Extract the raw Ed25519 private seed (32 bytes) and public key (32 bytes)
- * from an OKP JWK. The PASETO v4.public secret key is the 64-byte
- * concatenation of seed || public, which is what every conforming PASETO
- * library accepts.
+ * Convert an Ed25519 OKP JWK private key to a PASERK k4.secret string.
+ * PASETO v4.public secret keys are the 64-byte concatenation of seed||public,
+ * wrapped in the PASERK envelope `k4.secret.<base64url>` that paseto-ts and
+ * every conforming PASETO library expects.
  */
 export function jwkToPasetoSecretKey(jwk: {
   kty: string;
   crv: string;
   x: string;
   d?: string;
-}): Uint8Array {
+}): string {
   if (jwk.kty !== "OKP" || jwk.crv !== "Ed25519") {
     throw new Error(`Expected OKP/Ed25519 JWK, got ${jwk.kty}/${jwk.crv}.`);
   }
@@ -130,22 +137,22 @@ export function jwkToPasetoSecretKey(jwk: {
   const pub = base64UrlDecode(jwk.x);
   if (seed.length !== 32) throw new Error("Ed25519 seed must be 32 bytes.");
   if (pub.length !== 32) throw new Error("Ed25519 public key must be 32 bytes.");
-  const out = new Uint8Array(64);
-  out.set(seed, 0);
-  out.set(pub, 32);
-  return out;
+  const combined = new Uint8Array(64);
+  combined.set(seed, 0);
+  combined.set(pub, 32);
+  return `k4.secret.${base64UrlEncode(combined)}`;
 }
 
-/** Extract the raw Ed25519 public key (32 bytes) from an OKP JWK. */
+/** Convert an Ed25519 OKP JWK public key to a PASERK k4.public string. */
 export function jwkToPasetoPublicKey(jwk: {
   kty: string;
   crv: string;
   x: string;
-}): Uint8Array {
+}): string {
   if (jwk.kty !== "OKP" || jwk.crv !== "Ed25519") {
     throw new Error(`Expected OKP/Ed25519 JWK, got ${jwk.kty}/${jwk.crv}.`);
   }
   const pub = base64UrlDecode(jwk.x);
   if (pub.length !== 32) throw new Error("Ed25519 public key must be 32 bytes.");
-  return pub;
+  return `k4.public.${base64UrlEncode(pub)}`;
 }

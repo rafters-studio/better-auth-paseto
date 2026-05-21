@@ -66,7 +66,9 @@ export async function signPaseto(
   const privateJwk = JSON.parse(privateWebKeyJson);
   const secretKey = jwkToPasetoSecretKey(privateJwk);
 
-  return await pasetoSign(secretKey, payload, {
+  // Cast to paseto-ts's Payload: it uses `any` indexed access while our
+  // PasetoClaims uses `unknown` per project convention. The shape matches.
+  return pasetoSign(secretKey, payload as unknown as Record<string, unknown>, {
     footer: { kid: key.id },
   });
 }

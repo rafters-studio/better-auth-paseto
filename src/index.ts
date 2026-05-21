@@ -44,7 +44,9 @@ const verifyPasetoBodySchema = z.object({
  * is a drop-in replacement. The wire format is PASETO instead of JWS, with
  * no algorithm-confusion attack surface and a fixed Ed25519 keypair scheme.
  */
-export const paseto = <O extends PasetoOptions>(options?: O) => {
+export const paseto = <O extends PasetoOptions>(
+  options?: O,
+): BetterAuthPlugin => {
   // Remote-url + custom-signer consistency check.
   if (options?.paseto?.sign && !options.keys?.remoteUrl) {
     throw new BetterAuthError(
