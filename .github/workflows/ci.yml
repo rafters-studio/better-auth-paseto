@@ -22,10 +22,12 @@ jobs:
 
       - uses: pnpm/action-setup@v6
         with:
-          # Match local development. The lockfile was last touched by
-          # pnpm 11; pnpm 9 fails ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY
-          # on peer-dep permutations the newer format records.
-          version: 11
+          # Match the @rafters/mail repo. pnpm 11 made build-script
+          # execution strict (ERR_PNPM_IGNORED_BUILDS even with
+          # onlyBuiltDependencies set); pnpm 10.25 reads the same
+          # lockfile + respects onlyBuiltDependencies without that
+          # behaviour. Mail's CI is the canonical reference.
+          version: 10.25.0
 
       - uses: actions/setup-node@v6
         with:
