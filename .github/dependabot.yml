@@ -21,6 +21,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@better-auth/core"
         update-types: ["version-update:semver-major"]
+      # paseto-ts is the crypto primitive. Major bumps deserve manual
+      # scrutiny for spec compliance, wire-format changes, and any
+      # subtle behaviour that the test suite does not exercise. Minor
+      # and patch updates still flow through.
+      - dependency-name: "paseto-ts"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
