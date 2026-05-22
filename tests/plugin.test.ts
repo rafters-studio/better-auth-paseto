@@ -8,7 +8,13 @@ import {
   generateExportedKeyPair,
   jwkToPasetoSecretKey,
 } from "../src/utils";
-import { BASE_URL, freshDb, makeAuthWithSeededKeys } from "./helpers";
+import {
+  BASE_URL,
+  freshDb,
+  makeAuth,
+  makeAuthWithSeededKeys,
+  signUpAndGetCookie,
+} from "./helpers";
 
 /**
  * Spin up a real better-auth instance with the paseto plugin against an
@@ -34,47 +40,6 @@ function decodePasetoPayload(token: string): Record<string, unknown> {
   const bytes = base64UrlDecode(parts[2]!);
   const payloadBytes = bytes.slice(0, bytes.length - ED25519_SIG_BYTES);
   return JSON.parse(new TextDecoder().decode(payloadBytes));
-}
-
-function makeAuth(extraOptions?: Parameters<typeof paseto>[0]) {
-  return betterAuth({
-    baseURL: BASE_URL,
-    secret: "test-secret-that-is-at-least-32-chars-long",
-    database: memoryAdapter(freshDb()),
-    emailAndPassword: { enabled: true },
-    plugins: [
-      paseto({
-        paseto: {
-          issuer: BASE_URL,
-          audience: BASE_URL,
-          expirationTime: "15m",
-        },
-        ...extraOptions,
-      }),
-    ],
-  });
-}
-
-async function signUpAndGetCookie(
-  auth: ReturnType<typeof makeAuth>,
-  email = "alice@example.com",
-): Promise<string> {
-  const res = await auth.handler(
-    new Request("https://test.example.com/api/auth/sign-up/email", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        email,
-        password: "correct-horse-battery-staple",
-        name: "Alice",
-      }),
-    }),
-  );
-  const cookie = res.headers.get("set-cookie");
-  if (!cookie) {
-    throw new Error(`sign-up did not return a cookie (status ${res.status})`);
-  }
-  return cookie;
 }
 
 describe("paseto plugin: /paseto-keys", () => {

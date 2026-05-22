@@ -3,6 +3,7 @@ import type {
   GenericEndpointContext,
 } from "@better-auth/core";
 import type { DBAdapter } from "@better-auth/core/db/adapter";
+import { BetterAuthError } from "@better-auth/core/error";
 import type { PasetoKey, PasetoOptions } from "./types";
 
 /**
@@ -50,12 +51,27 @@ export const getPasetoKeysAdapter = (
       });
       return keys?.[0];
     },
+    /**
+     * Create a key row. `requestCtx` is required only when a user
+     * adapter override is set -- the override may need request-scoped
+     * context to talk to a KMS or secrets store. The default DB path
+     * does not use the request context and accepts undefined, which
+     * lets the plugin init hook seed the first key without faking a
+     * request.
+     */
     createKey: async (
-      ctx: GenericEndpointContext,
       key: Omit<PasetoKey, "id">,
+      requestCtx?: GenericEndpointContext,
     ) => {
       if (options?.adapter?.createKey) {
-        return await options.adapter.createKey(key, ctx);
+        if (!requestCtx) {
+          throw new BetterAuthError(
+            "options.adapter.createKey requires a request context. " +
+              "When a custom adapter is configured, the first key must be " +
+              "seeded out of band (init cannot synthesise a request).",
+          );
+        }
+        return await options.adapter.createKey(key, requestCtx);
       }
       return await adapter.create<Omit<PasetoKey, "id">, PasetoKey>({
         model: "paseto_keys",

@@ -87,6 +87,16 @@ Set `keys.rotationInterval` to a number of seconds. The plugin marks each new ke
 
 If you want to rotate manually instead, set no `rotationInterval` and call `createPasetoKey(ctx, options)` from your own code when you want a fresh key.
 
+### Key creation under load
+
+The plugin guards key creation with a per-instance async mutex. When N concurrent sign calls race past a rotation boundary they collapse to a single creation -- the first acquires the lock, creates the key, and the other N-1 receive the same result. Within a single Node, Cloudflare Worker, or Bun instance this means the `paseto_keys` table gains at most one row per rotation interval.
+
+**Across instances, the race remains.** Two Workers seeing the rotation boundary at the same moment will each insert a row; both rows verify fine, but the table grows faster than rotation alone. Installations that need strict at-most-one guarantees should either provide a custom `options.adapter` that wraps D1's `INSERT OR IGNORE` (or equivalent) on the creation path, or coordinate externally via a Durable Object, KMS, or scheduled-rotation job.
+
+### First-key seeding
+
+The first signing key is created during better-auth's `init` phase, not lazily on the first `/paseto-keys` GET. This keeps reads as reads (HTTP semantics) and avoids a first-touch race across concurrent boot-time requests. Installations using `keys.remoteUrl` (verify-only mode) or `options.adapter` (custom adapter) skip the init seed and are expected to provision their first key out-of-band.
+
 ## Differences from the JWT plugin
 
 The endpoint surface mirrors the JWT plugin so existing consumers can switch with minimal churn. The two POST endpoints deliberately deviate on defaults the JWT plugin inherited from a more permissive era:

@@ -7,7 +7,12 @@ import {
   generateExportedKeyPair,
   jwkToPasetoSecretKey,
 } from "../src/utils";
-import { BASE_URL, freshDb, makeAuthWithSeededKeys } from "./helpers";
+import {
+  BASE_URL,
+  freshDb,
+  makeAuthWithSeededKeys,
+  verifyVia,
+} from "./helpers";
 
 /**
  * Coverage for Phase-B additions:
@@ -32,20 +37,6 @@ async function tokenWith(
   });
 }
 
-async function verifyVia(
-  auth: ReturnType<typeof makeAuthWithSeededKeys>,
-  token: string,
-): Promise<{ payload: unknown }> {
-  const res = await auth.handler(
-    new Request(`${BASE_URL}/api/auth/verify-paseto`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ token }),
-    }),
-  );
-  return res.json();
-}
-
 describe("nbf enforcement", () => {
   it("rejects a token whose nbf is in the future", async () => {
     const { publicWebKey, privateWebKey } = await generateExportedKeyPair();
@@ -65,7 +56,7 @@ describe("nbf enforcement", () => {
       },
       "kid-nbf-future",
     );
-    const { payload } = await verifyVia(auth, token);
+    const payload = await verifyVia(auth, token);
     expect(payload).toBeNull();
   });
 
@@ -87,7 +78,7 @@ describe("nbf enforcement", () => {
       },
       "kid-nbf-past",
     );
-    const { payload } = await verifyVia(auth, token);
+    const payload = await verifyVia(auth, token);
     expect(payload).not.toBeNull();
   });
 });
@@ -109,7 +100,7 @@ describe("clock skew tolerance", () => {
       },
       "kid-skew-exp",
     );
-    const { payload } = await verifyVia(auth, token);
+    const payload = await verifyVia(auth, token);
     expect(payload).not.toBeNull();
   });
 
@@ -129,7 +120,7 @@ describe("clock skew tolerance", () => {
       },
       "kid-skew-exp-90",
     );
-    const { payload } = await verifyVia(auth, token);
+    const payload = await verifyVia(auth, token);
     expect(payload).toBeNull();
   });
 
@@ -150,7 +141,7 @@ describe("clock skew tolerance", () => {
       },
       "kid-skew-nbf",
     );
-    const { payload } = await verifyVia(auth, token);
+    const payload = await verifyVia(auth, token);
     expect(payload).not.toBeNull();
   });
 
@@ -183,7 +174,7 @@ describe("clock skew tolerance", () => {
       },
       "kid-skew-zero",
     );
-    const { payload } = await verifyVia(auth, token);
+    const payload = await verifyVia(auth, token);
     expect(payload).toBeNull();
   });
 });
@@ -220,7 +211,7 @@ describe("PasetoVerifyError -- verifyPasetoWithReason", () => {
       exp: new Date(Date.now() + 60_000).toISOString(),
     });
 
-    const { payload } = await verifyVia(auth, tokenNoFooter);
+    const payload = await verifyVia(auth, tokenNoFooter);
     expect(payload).toBeNull();
   });
 
@@ -244,7 +235,7 @@ describe("PasetoVerifyError -- verifyPasetoWithReason", () => {
       },
       "phantom-kid",
     );
-    const { payload } = await verifyVia(auth, token);
+    const payload = await verifyVia(auth, token);
     expect(payload).toBeNull();
   });
 
@@ -264,7 +255,7 @@ describe("PasetoVerifyError -- verifyPasetoWithReason", () => {
       },
       "kid-aud",
     );
-    const { payload } = await verifyVia(auth, token);
+    const payload = await verifyVia(auth, token);
     expect(payload).toBeNull();
   });
 });

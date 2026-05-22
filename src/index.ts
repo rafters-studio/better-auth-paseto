@@ -81,14 +81,24 @@ export const paseto = <O extends PasetoOptions>(
     id: "paseto",
     options: options as NoInfer<O>,
     /**
-     * Probe Web Crypto for Ed25519 support during better-auth instance
-     * construction. If the runtime cannot generate Ed25519 keys (Node
-     * <20, Cloudflare Workers without nodejs_compat in older runtimes,
-     * older Bun), every sign call would later fail with a cryptic Web
-     * Crypto error. Failing here points the operator at the actual
-     * cause before any traffic flows.
+     * Two startup checks:
+     *
+     * 1. Probe Web Crypto for Ed25519 support. Older runtimes fail
+     *    cryptically on the first sign call; failing here at init names
+     *    the cause for the operator.
+     *
+     * 2. Ensure at least one signing key exists in the table. Without
+     *    this, the first GET /paseto-keys would have to lazily create a
+     *    key on a read path -- a HTTP-semantics violation and a race
+     *    surface across concurrent first-touches. Moving the seed to
+     *    init means reads stay reads.
+     *
+     * The seed step is skipped when `keys.remoteUrl` is set (no local
+     * table to seed) or when `options.adapter` is configured (init has
+     * no request context, and a user adapter may need one -- those
+     * installations seed out-of-band).
      */
-    init: async () => {
+    init: async (initCtx) => {
       try {
         await crypto.subtle.generateKey("Ed25519", false, ["sign", "verify"]);
       } catch (err) {
@@ -98,6 +108,19 @@ export const paseto = <O extends PasetoOptions>(
             `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
+
+      if (options?.keys?.remoteUrl || options?.adapter) return;
+
+      const existing = await initCtx.adapter.findMany({
+        model: "paseto_keys",
+        limit: 1,
+      });
+      if (existing && existing.length > 0) return;
+
+      await createPasetoKey(
+        { adapter: initCtx.adapter, secretConfig: initCtx.secret },
+        options,
+      );
     },
     endpoints: {
       /**
@@ -152,15 +175,18 @@ export const paseto = <O extends PasetoOptions>(
             throw new APIError("NOT_FOUND");
           }
 
+          // Read-only path. The init hook above guarantees at least one
+          // key exists at server-startup time (except for remote-url or
+          // custom-adapter installations, which seed out-of-band). If
+          // the table is empty here something has gone wrong externally
+          // -- truncation, migration not applied, etc -- and the error
+          // points the operator at the recovery action.
           const adapter = getPasetoKeysAdapter(ctx.context.adapter, options);
-          let keys = await adapter.getAllKeys(ctx);
-          if (!keys || keys.length === 0) {
-            await createPasetoKey(ctx, options);
-            keys = await adapter.getAllKeys(ctx);
-          }
+          const keys = await adapter.getAllKeys(ctx);
           if (!keys?.length) {
             throw new BetterAuthError(
-              "No PASETO keys found. Ensure the paseto_keys table is reachable.",
+              "No PASETO keys found. Either init did not run (check plugin order) " +
+                "or the paseto_keys table was cleared externally.",
             );
           }
 

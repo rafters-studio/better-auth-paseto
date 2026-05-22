@@ -2,9 +2,8 @@ import type { GenericEndpointContext } from "@better-auth/core";
 import { BetterAuthError } from "@better-auth/core/error";
 import { symmetricDecrypt } from "better-auth/crypto";
 import { sign as pasetoSign } from "paseto-ts/v4";
-import { getPasetoKeysAdapter } from "./adapter";
 import type { PasetoClaims, PasetoOptions } from "./types";
-import { createPasetoKey, jwkToPasetoSecretKey, toExpPaseto } from "./utils";
+import { ensureFreshKey, jwkToPasetoSecretKey, toExpPaseto } from "./utils";
 
 /**
  * Sign a PASETO v4.public token.
@@ -45,11 +44,16 @@ export async function signPaseto(
     return options.paseto.sign(payload);
   }
 
-  const adapter = getPasetoKeysAdapter(ctx.context.adapter, options);
-  let key = await adapter.getLatestKey(ctx);
-  if (!key || (key.expiresAt && key.expiresAt < new Date())) {
-    key = await createPasetoKey(ctx, options);
-  }
+  // ensureFreshKey collapses concurrent sign calls that race past a
+  // rotation boundary into a single key creation per instance. The
+  // helper does its own latest-key lookup + freshness check, so the
+  // sign path no longer queries the adapter for the latest key
+  // separately.
+  const key = await ensureFreshKey(
+    { adapter: ctx.context.adapter, secretConfig: ctx.context.secretConfig },
+    options,
+    ctx,
+  );
 
   const encryptionOn = !options?.keys?.disablePrivateKeyEncryption;
   const privateWebKeyJson = encryptionOn
