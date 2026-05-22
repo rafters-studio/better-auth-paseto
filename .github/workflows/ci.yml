@@ -27,10 +27,15 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Library checks
       - run: pnpm typecheck
-
       - run: pnpm lint
-
       - run: pnpm test
-
       - run: pnpm build
+
+      # Integration check: the example Hono app exercises the package
+      # through Hono routing + real HTTP request/response shapes, and
+      # cross-verifies a token against /paseto-keys with paseto-ts
+      # directly to pin the JWKS interop story.
+      - run: pnpm --filter better-auth-paseto-example-hono typecheck
+      - run: pnpm --filter better-auth-paseto-example-hono test
