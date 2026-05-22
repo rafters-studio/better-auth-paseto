@@ -2,10 +2,3 @@ packages:
   - "."
   - "examples/*"
 
-# Packages whose postinstall build scripts pnpm 11 is allowed to run.
-# Without this list pnpm 11 refuses to execute lifecycle scripts and
-# exits non-zero, which is the right default for security -- but
-# esbuild (pulled in transitively by vitest) needs its build step.
-onlyBuiltDependencies:
-  - esbuild
-
