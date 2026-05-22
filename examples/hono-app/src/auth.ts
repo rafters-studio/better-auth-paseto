@@ -11,8 +11,15 @@ const db: Record<string, any[]> = {
   paseto_keys: [],
 };
 
+// Vite-based tools (vitest, astro, sveltekit, ...) set
+// process.env.BASE_URL = "/" by default. `??` does not fall back on
+// "/", so an unsanitised read produces a malformed base URL. Treat
+// "/" and empty as unset.
+const envBase = process.env.BASE_URL;
+const baseURL = !envBase || envBase === "/" ? "http://localhost:3000" : envBase;
+
 export const auth = betterAuth({
-  baseURL: process.env.BASE_URL ?? "http://localhost:3000",
+  baseURL,
   secret:
     process.env.BETTER_AUTH_SECRET ??
     "dev-secret-replace-me-with-something-32-chars-or-more",
@@ -21,8 +28,8 @@ export const auth = betterAuth({
   plugins: [
     paseto({
       paseto: {
-        issuer: process.env.BASE_URL ?? "http://localhost:3000",
-        audience: process.env.BASE_URL ?? "http://localhost:3000",
+        issuer: baseURL,
+        audience: baseURL,
         expirationTime: "15m",
       },
     }),
