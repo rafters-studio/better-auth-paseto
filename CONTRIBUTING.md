@@ -20,7 +20,7 @@ Node 20+ required. Web Crypto Ed25519 is the runtime floor. The plugin probes fo
 
 ## Releasing
 
-Tagged-release auto-publish wires up via `.github/workflows/release.yml`.
+Tag-driven release via `.github/workflows/release.yml`. Matches the rest of the `@rafters/` ecosystem (`ledger`, `mail`, `astro-data`, `astro-meta`) -- publish goes through **npm trusted publishing via OIDC**, no `NPM_TOKEN` involved.
 
 ```sh
 # 1. Bump the version + commit
@@ -30,19 +30,26 @@ npm version patch -m "v%s"
 git push --tags
 ```
 
-The workflow runs typecheck / lint / test / build, then `pnpm publish --access public --provenance --no-git-checks`. Provenance attaches a SLSA attestation to the npm package.
+The workflow runs typecheck / lint / test / build, then `npm publish --access=public --provenance`. The OIDC exchange happens on the `--provenance` flag and attaches a SLSA attestation to the published package. A GitHub Release is created from auto-generated notes against the tag.
 
-### Operator setup (one-time)
+### Operator setup (one-time, before the first release)
 
-- `NPM_TOKEN` repository secret: a granular npm access token scoped to publish `@rafters/better-auth-paseto` only. Rotate yearly.
-- Token type: **Granular Access Token** (not Classic). Read-only on `@rafters` org metadata, read-write on this package's publish action.
-- Permissions for the workflow: `contents: read`, `id-token: write` (already in the workflow file -- enables OIDC for provenance).
+Configure npm trusted publishing for `@rafters/better-auth-paseto`:
+
+1. Publish v0.1.x once manually under a maintainer account so the package exists on npm.
+2. Go to <https://www.npmjs.com/package/@rafters/better-auth-paseto/access>.
+3. Trusted publishers -> **Add Trusted Publisher** -> GitHub Actions.
+4. Repository: `rafters-studio/better-auth-paseto`. Workflow filename: `release.yml`. Environment: leave blank.
+
+After that the workflow handles every subsequent release via OIDC. **No `NPM_TOKEN` secret on the repo is needed or wanted** -- setting one (or `NODE_AUTH_TOKEN` in the publish step env) short-circuits OIDC and the publish fails with the wrong auth method.
+
+The matching footguns are baked into a comment in the workflow header. Read it before editing `release.yml`.
 
 ### Versioning
 
-Manual `npm version` bump until release cadence picks up. If we adopt automation, prefer [changesets](https://github.com/changesets/changesets) -- it works cleanly with pnpm workspaces and produces good changelogs.
+Manual `npm version` bump for now. If release cadence picks up we can adopt [changesets](https://github.com/changesets/changesets) -- `mail` already uses it for the multi-package case.
 
-`CHANGELOG.md` is updated by hand with each release. Keep entries in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
+`CHANGELOG.md` is updated by hand with each release. Keep entries in [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format. The GitHub Release uses `--generate-notes` so the auto-generated text catches anything CHANGELOG missed.
 
 ## Security reports
 

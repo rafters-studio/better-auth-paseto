@@ -1,40 +1,68 @@
 name: Release
 
+# Triggered by pushing a v* tag. See CONTRIBUTING.md for the full release
+# procedure and the one-time npm trusted-publisher setup required for
+# the package.
+#
+# OIDC gotchas (learned from rafters-studio/rafters, ledger, mail,
+# astro-meta -- all of these reference the same set of footguns):
+# - Do NOT set registry-url on setup-node. It writes a .npmrc that
+#   blocks OIDC auth by forcing token-based publishing.
+# - Do NOT set NODE_AUTH_TOKEN in the publish step env. Any value
+#   (including empty) short-circuits the OIDC path.
+# - The id-token: write permission is required.
+# - --provenance triggers the OIDC exchange with npmjs.org.
+# - Node 24.12 ships npm 11.x; trusted-publishing OIDC requires npm
+#   11.5+. Node 22 (npm 10.x) errors with ENEEDAUTH on
+#   `npm publish --provenance`.
 on:
   push:
-    tags:
-      - "v*"
+    tags: ["v*"]
 
 permissions:
-  contents: read
   id-token: write
+  contents: write
 
 jobs:
-  publish:
+  release:
+    name: Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
         with:
           version: 9
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: 24.12
           cache: pnpm
-          registry-url: "https://registry.npmjs.org"
+          # Intentionally no registry-url. See OIDC gotchas in file header.
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
-      - run: pnpm typecheck
+      - name: Typecheck
+        run: pnpm typecheck
 
-      - run: pnpm lint
+      - name: Lint
+        run: pnpm lint
 
-      - run: pnpm test
+      - name: Test
+        run: pnpm test
 
-      - run: pnpm build
+      - name: Build
+        run: pnpm build
 
-      - run: pnpm publish --access public --provenance --no-git-checks
+      - name: Publish to npm
+        run: npm publish --access=public --provenance
+        # Intentionally no NODE_AUTH_TOKEN. See OIDC gotchas in file header.
+
+      - name: Create GitHub Release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
