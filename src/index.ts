@@ -20,6 +20,10 @@ export { createPasetoKey, generateExportedKeyPair, toExpPaseto } from "./utils";
 export { verifyPaseto } from "./verify";
 
 declare module "@better-auth/core" {
+  // TypeScript requires merged interface declarations to use the same
+  // type parameter names as the base. The names appear unused here but
+  // changing them would break declaration merging with @better-auth/core.
+  // oxlint-disable-next-line no-unused-vars
   interface BetterAuthPluginRegistry<AuthOptions, Options> {
     paseto: {
       creator: typeof paseto;

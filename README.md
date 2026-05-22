@@ -1,5 +1,8 @@
 # @rafters/better-auth-paseto
 
+[![CI](https://github.com/rafters-studio/better-auth-paseto/actions/workflows/ci.yml/badge.svg)](https://github.com/rafters-studio/better-auth-paseto/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+
 PASETO v4.public plugin for [better-auth](https://better-auth.com). Shape-compatible replacement for better-auth's built-in JWT plugin, with safer defaults on the two POST endpoints (see [Differences from the JWT plugin](#differences-from-the-jwt-plugin)).
 
 ## Why
