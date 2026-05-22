@@ -70,10 +70,15 @@ function parseDuration(s: string): number {
  * is fixed at Ed25519 -- there is no algorithm choice, by spec design.
  */
 export async function generateExportedKeyPair() {
-  const keyPair = await crypto.subtle.generateKey("Ed25519", true, [
+  // Web Crypto types Ed25519 generateKey as CryptoKeyPair | CryptoKey
+  // (the union covers both asymmetric and symmetric algorithms). With
+  // an asymmetric algorithm and sign+verify usages the result is always
+  // a CryptoKeyPair; cast rather than do a runtime branch that cannot
+  // fire.
+  const keyPair = (await crypto.subtle.generateKey("Ed25519", true, [
     "sign",
     "verify",
-  ]);
+  ])) as CryptoKeyPair;
   const publicWebKey = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
   const privateWebKey = await crypto.subtle.exportKey(
     "jwk",

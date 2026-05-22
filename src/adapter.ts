@@ -37,7 +37,10 @@ export const getPasetoKeysAdapter = (
     getLatestKey: async (ctx: GenericEndpointContext) => {
       if (options?.adapter?.getKeys) {
         const keys = await options.adapter.getKeys(ctx);
-        return keys?.sort(
+        // toSorted instead of sort: the user-supplied adapter may
+        // cache or share the returned array, so we must not mutate it
+        // in place.
+        return keys?.toSorted(
           (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
         )[0];
       }
