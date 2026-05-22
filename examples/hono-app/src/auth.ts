@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
-import { paseto } from "@rafters-studio/better-auth-paseto";
+import { paseto } from "@rafters/better-auth-paseto";
 
 // In-memory DB. Every model the system uses needs a slot pre-allocated.
 const db: Record<string, any[]> = {

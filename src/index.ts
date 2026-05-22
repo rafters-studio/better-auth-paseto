@@ -27,14 +27,21 @@ declare module "@better-auth/core" {
   }
 }
 
+// Body schema for /sign-paseto. `payload` carries supplementary
+// application-level claims only -- the security-relevant claims
+// (sub/iss/aud/iat/exp) are sourced from the session and plugin options,
+// never from the request body. Caller-supplied values for those keys are
+// stripped before signing.
 const signPasetoBodySchema = z.object({
   payload: z.record(z.string(), z.any()),
-  overrideOptions: z.record(z.string(), z.any()).optional(),
 });
 
+// Body schema for /verify-paseto. Issuer and other claim expectations are
+// resolved from plugin options on the server side, not from the request
+// body -- otherwise a verifier endpoint would trust the caller's claim of
+// what to expect, defeating the iss check.
 const verifyPasetoBodySchema = z.object({
   token: z.string(),
-  issuer: z.string().optional(),
 });
 
 /**
@@ -193,38 +200,74 @@ export const paseto = <O extends PasetoOptions>(
         },
       ),
 
-      /** Sign an arbitrary payload as a PASETO token. */
+      /**
+       * Sign a PASETO token for the active session, attaching supplementary
+       * claims supplied by the caller.
+       *
+       * Requires an authenticated session. Security-relevant claims are
+       * always sourced from server state, not the request body:
+       * - `sub` from the session (via `paseto.getSubject` or `user.id`)
+       * - `iss`, `aud`, `exp` from plugin options (or `baseURL` default)
+       * - `iat` from the current server time
+       *
+       * Anything else the caller supplies in `payload` is merged through.
+       */
       signPaseto: createAuthEndpoint(
         "/sign-paseto",
         {
           method: "POST",
+          requireHeaders: true,
+          use: [sessionMiddleware],
           metadata: {
             $Infer: {
-              body: {} as {
-                payload: PasetoClaims;
-                overrideOptions?: PasetoOptions;
-              },
+              body: {} as { payload: PasetoClaims },
             },
           },
           body: signPasetoBodySchema,
         },
         async (c) => {
+          const session = c.context.session!;
+          const body = c.body.payload as PasetoClaims;
+          // Strip security-relevant claims from the caller's payload; they
+          // are reset from server state below.
+          const {
+            sub: _sub,
+            iss: _iss,
+            aud: _aud,
+            iat: _iat,
+            exp: _exp,
+            ...supplementary
+          } = body;
+          const sub =
+            (await options?.paseto?.getSubject?.(session)) ?? session.user.id;
           const token = await signPaseto(c, {
-            options: { ...options, ...c.body.overrideOptions },
-            payload: c.body.payload as PasetoClaims,
+            options,
+            payload: {
+              ...supplementary,
+              iat: new Date().toISOString(),
+              sub,
+            } as PasetoClaims,
           });
           return c.json({ token });
         },
       ),
 
-      /** Verify a PASETO token. Returns the payload or null. */
+      /**
+       * Verify a PASETO token against the server's configured issuer and
+       * audience. Returns the payload or null.
+       *
+       * Claim expectations (iss/aud) are taken from plugin options -- the
+       * request body cannot influence them. A verifier endpoint that lets
+       * the caller choose what to expect is not a verifier; it is a
+       * rubber-stamp.
+       */
       verifyPaseto: createAuthEndpoint(
         "/verify-paseto",
         {
           method: "POST",
           metadata: {
             $Infer: {
-              body: {} as { token: string; issuer?: string },
+              body: {} as { token: string },
               response: {} as {
                 payload: {
                   sub: string;
@@ -237,13 +280,7 @@ export const paseto = <O extends PasetoOptions>(
           body: verifyPasetoBodySchema,
         },
         async (ctx) => {
-          const overrideOptions = ctx.body.issuer
-            ? {
-                ...options,
-                paseto: { ...options?.paseto, issuer: ctx.body.issuer },
-              }
-            : options;
-          const payload = await verifyPasetoHelper(ctx.body.token, overrideOptions);
+          const payload = await verifyPasetoHelper(ctx.body.token, options);
           return ctx.json({ payload });
         },
       ),
