@@ -1,32 +1,10 @@
 import { betterAuth } from "better-auth";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { sign as pasetoSign } from "paseto-ts/v4";
-
-/**
- * Decode the PASETO v4.public payload without verification. Format:
- *   v4.public.<base64url(payload_json_bytes || ed25519_signature)>[.<footer>]
- * The signature is the trailing 64 bytes of the decoded segment 2; payload
- * JSON is the prefix. Used in tests only to inspect what the server stamped
- * into a token without round-tripping through /verify-paseto.
- */
-function decodePasetoPayload(token: string): Record<string, unknown> {
-  const parts = token.split(".");
-  if (parts[0] !== "v4" || parts[1] !== "public") {
-    throw new Error(`not a v4.public token: ${token.slice(0, 16)}...`);
-  }
-  const seg = parts[2]!;
-  const pad = "=".repeat((4 - (seg.length % 4)) % 4);
-  const b64 = (seg + pad).replace(/-/g, "+").replace(/_/g, "/");
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const payloadBytes = bytes.slice(0, bytes.length - 64);
-  const json = new TextDecoder().decode(payloadBytes);
-  return JSON.parse(json);
-}
 import { beforeEach, describe, expect, it } from "vitest";
 import { paseto } from "../src/index";
 import {
+  base64UrlDecode,
   generateExportedKeyPair,
   jwkToPasetoSecretKey,
 } from "../src/utils";
@@ -38,6 +16,26 @@ import {
  * on first call, and the verifyPaseto wrapper's claim enforcement.
  */
 
+const ED25519_SIG_BYTES = 64;
+const BASE_URL = "https://test.example.com";
+
+/**
+ * Decode the PASETO v4.public payload without verification. Format:
+ *   v4.public.<base64url(payload_json_bytes || ed25519_signature)>[.<footer>]
+ * The signature is the trailing 64 bytes of the decoded segment 2; payload
+ * JSON is the prefix. Used only to inspect what the server stamped into a
+ * token without round-tripping through /verify-paseto.
+ */
+function decodePasetoPayload(token: string): Record<string, unknown> {
+  const parts = token.split(".");
+  if (parts[0] !== "v4" || parts[1] !== "public") {
+    throw new Error(`not a v4.public token: ${token.slice(0, 16)}...`);
+  }
+  const bytes = base64UrlDecode(parts[2]!);
+  const payloadBytes = bytes.slice(0, bytes.length - ED25519_SIG_BYTES);
+  return JSON.parse(new TextDecoder().decode(payloadBytes));
+}
+
 function freshDb(): Record<string, any[]> {
   return {
     user: [],
@@ -48,17 +46,66 @@ function freshDb(): Record<string, any[]> {
   };
 }
 
+interface SeededKey {
+  id: string;
+  publicKey: object;
+  privateKey: object;
+  createdAt?: Date;
+  expiresAt?: Date;
+}
+
+/**
+ * Build a better-auth instance pre-loaded with known keypairs in the
+ * paseto_keys table. Used to drive verification-side tests against tokens
+ * we want to construct ourselves (expired, wrong-issuer, footer-rebased).
+ *
+ * `disablePrivateKeyEncryption: true` matches how the seeded rows are
+ * persisted -- raw JWK JSON, no symmetric wrap -- so the plugin's decrypt
+ * step does not run on them.
+ */
+function makeAuthWithSeededKeys(
+  keys: SeededKey[],
+  extraOptions?: Parameters<typeof paseto>[0],
+) {
+  const db: Record<string, any[]> = {
+    ...freshDb(),
+    paseto_keys: keys.map((k) => ({
+      id: k.id,
+      publicKey: JSON.stringify(k.publicKey),
+      privateKey: JSON.stringify(k.privateKey),
+      createdAt: k.createdAt ?? new Date(),
+      ...(k.expiresAt ? { expiresAt: k.expiresAt } : {}),
+    })),
+  };
+  return betterAuth({
+    baseURL: BASE_URL,
+    secret: "test-secret-that-is-at-least-32-chars-long",
+    database: memoryAdapter(db),
+    emailAndPassword: { enabled: true },
+    plugins: [
+      paseto({
+        keys: { disablePrivateKeyEncryption: true },
+        paseto: {
+          issuer: BASE_URL,
+          audience: BASE_URL,
+        },
+        ...extraOptions,
+      }),
+    ],
+  });
+}
+
 function makeAuth(extraOptions?: Parameters<typeof paseto>[0]) {
   return betterAuth({
-    baseURL: "https://test.example.com",
+    baseURL: BASE_URL,
     secret: "test-secret-that-is-at-least-32-chars-long",
     database: memoryAdapter(freshDb()),
     emailAndPassword: { enabled: true },
     plugins: [
       paseto({
         paseto: {
-          issuer: "https://test.example.com",
-          audience: "https://test.example.com",
+          issuer: BASE_URL,
+          audience: BASE_URL,
           expirationTime: "15m",
         },
         ...extraOptions,
@@ -118,47 +165,24 @@ describe("paseto plugin: /paseto-keys", () => {
       await generateExportedKeyPair();
     const { publicWebKey: deadPub, privateWebKey: deadPriv } =
       await generateExportedKeyPair();
-
     const longAgo = new Date(Date.now() - 1000 * 60 * 60 * 24 * 365);
-    const db: Record<string, any[]> = {
-      ...freshDb(),
-      paseto_keys: [
-        {
-          id: "live-key",
-          publicKey: JSON.stringify(livePub),
-          privateKey: JSON.stringify(livePriv),
-          createdAt: new Date(),
-        },
+
+    const localAuth = makeAuthWithSeededKeys(
+      [
+        { id: "live-key", publicKey: livePub, privateKey: livePriv },
         {
           id: "dead-key",
-          publicKey: JSON.stringify(deadPub),
-          privateKey: JSON.stringify(deadPriv),
+          publicKey: deadPub,
+          privateKey: deadPriv,
           createdAt: longAgo,
           expiresAt: longAgo,
         },
       ],
-    };
-    const localAuth = betterAuth({
-      baseURL: "https://test.example.com",
-      secret: "test-secret-that-is-at-least-32-chars-long",
-      database: memoryAdapter(db),
-      emailAndPassword: { enabled: true },
-      plugins: [
-        paseto({
-          keys: {
-            disablePrivateKeyEncryption: true,
-            gracePeriod: 60 * 60 * 24 * 7,
-          },
-          paseto: {
-            issuer: "https://test.example.com",
-            audience: "https://test.example.com",
-          },
-        }),
-      ],
-    });
+      { keys: { disablePrivateKeyEncryption: true, gracePeriod: 60 * 60 * 24 * 7 } },
+    );
 
     const res = await localAuth.handler(
-      new Request("https://test.example.com/api/auth/paseto-keys"),
+      new Request(`${BASE_URL}/api/auth/paseto-keys`),
     );
     expect(res.status).toBe(200);
     const { keys } = await res.json();
@@ -323,54 +347,26 @@ describe("paseto plugin: /verify-paseto", () => {
   });
 
   it("returns null when the footer kid is rebased to a different known key", async () => {
-    // Seed two known keypairs. Sign a token with key A, then rewrite the
-    // footer to claim key B. Verify must fail because the signature was
-    // produced by A's secret, but the verifier loads B's public key based
-    // on the footer claim.
+    // Sign a token with key A, then rewrite the footer to claim key B.
+    // Verify must fail: the signature was produced by A's secret, but the
+    // verifier loads B's public key based on the (untrusted) footer claim.
     const { publicWebKey: pubA, privateWebKey: privA } =
       await generateExportedKeyPair();
     const { publicWebKey: pubB, privateWebKey: privB } =
       await generateExportedKeyPair();
-    const db: Record<string, any[]> = {
-      ...freshDb(),
-      paseto_keys: [
-        {
-          id: "key-a",
-          publicKey: JSON.stringify(pubA),
-          privateKey: JSON.stringify(privA),
-          createdAt: new Date(),
-        },
-        {
-          id: "key-b",
-          publicKey: JSON.stringify(pubB),
-          privateKey: JSON.stringify(privB),
-          createdAt: new Date(),
-        },
-      ],
-    };
-    const localAuth = betterAuth({
-      baseURL: "https://test.example.com",
-      secret: "test-secret-that-is-at-least-32-chars-long",
-      database: memoryAdapter(db),
-      emailAndPassword: { enabled: true },
-      plugins: [
-        paseto({
-          keys: { disablePrivateKeyEncryption: true },
-          paseto: {
-            issuer: "https://test.example.com",
-            audience: "https://test.example.com",
-          },
-        }),
-      ],
-    });
+
+    const localAuth = makeAuthWithSeededKeys([
+      { id: "key-a", publicKey: pubA, privateKey: privA },
+      { id: "key-b", publicKey: pubB, privateKey: privB },
+    ]);
 
     const secretA = jwkToPasetoSecretKey(privA as any);
     const tokenSignedByA = pasetoSign(
       secretA,
       {
         sub: "u",
-        iss: "https://test.example.com",
-        aud: "https://test.example.com",
+        iss: BASE_URL,
+        aud: BASE_URL,
         iat: new Date().toISOString(),
         exp: new Date(Date.now() + 60_000).toISOString(),
       },
@@ -385,7 +381,7 @@ describe("paseto plugin: /verify-paseto", () => {
     const rebased = [parts[0], parts[1], parts[2], rebasedFooter].join(".");
 
     const verifyRes = await localAuth.handler(
-      new Request("https://test.example.com/api/auth/verify-paseto", {
+      new Request(`${BASE_URL}/api/auth/verify-paseto`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token: rebased }),
@@ -398,40 +394,17 @@ describe("paseto plugin: /verify-paseto", () => {
 
   it("returns null for an expired token", async () => {
     const { publicWebKey, privateWebKey } = await generateExportedKeyPair();
-    const dbWithKnownKey: Record<string, any[]> = {
-      ...freshDb(),
-      paseto_keys: [
-        {
-          id: "test-kid-1",
-          publicKey: JSON.stringify(publicWebKey),
-          privateKey: JSON.stringify(privateWebKey),
-          createdAt: new Date(),
-        },
-      ],
-    };
-    const localAuth = betterAuth({
-      baseURL: "https://test.example.com",
-      secret: "test-secret-that-is-at-least-32-chars-long",
-      database: memoryAdapter(dbWithKnownKey),
-      emailAndPassword: { enabled: true },
-      plugins: [
-        paseto({
-          keys: { disablePrivateKeyEncryption: true },
-          paseto: {
-            issuer: "https://test.example.com",
-            audience: "https://test.example.com",
-          },
-        }),
-      ],
-    });
+    const localAuth = makeAuthWithSeededKeys([
+      { id: "test-kid-1", publicKey: publicWebKey, privateKey: privateWebKey },
+    ]);
 
     const secretPaserk = jwkToPasetoSecretKey(privateWebKey as any);
     const expiredToken = pasetoSign(
       secretPaserk,
       {
         sub: "user-7",
-        iss: "https://test.example.com",
-        aud: "https://test.example.com",
+        iss: BASE_URL,
+        aud: BASE_URL,
         iat: new Date(Date.now() - 120_000).toISOString(),
         exp: new Date(Date.now() - 60_000).toISOString(),
       },
@@ -447,7 +420,7 @@ describe("paseto plugin: /verify-paseto", () => {
     );
 
     const verifyRes = await localAuth.handler(
-      new Request("https://test.example.com/api/auth/verify-paseto", {
+      new Request(`${BASE_URL}/api/auth/verify-paseto`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token: expiredToken }),
@@ -461,39 +434,16 @@ describe("paseto plugin: /verify-paseto", () => {
     // /sign-paseto no longer lets a caller override iss, so produce a
     // wrong-issuer token directly against a seeded key.
     const { publicWebKey, privateWebKey } = await generateExportedKeyPair();
-    const db: Record<string, any[]> = {
-      ...freshDb(),
-      paseto_keys: [
-        {
-          id: "kid-iss-test",
-          publicKey: JSON.stringify(publicWebKey),
-          privateKey: JSON.stringify(privateWebKey),
-          createdAt: new Date(),
-        },
-      ],
-    };
-    const localAuth = betterAuth({
-      baseURL: "https://test.example.com",
-      secret: "test-secret-that-is-at-least-32-chars-long",
-      database: memoryAdapter(db),
-      emailAndPassword: { enabled: true },
-      plugins: [
-        paseto({
-          keys: { disablePrivateKeyEncryption: true },
-          paseto: {
-            issuer: "https://test.example.com",
-            audience: "https://test.example.com",
-          },
-        }),
-      ],
-    });
+    const localAuth = makeAuthWithSeededKeys([
+      { id: "kid-iss-test", publicKey: publicWebKey, privateKey: privateWebKey },
+    ]);
     const secret = jwkToPasetoSecretKey(privateWebKey as any);
     const wrongIssuerToken = pasetoSign(
       secret,
       {
         sub: "u",
         iss: "https://wrong-issuer.example.com",
-        aud: "https://test.example.com",
+        aud: BASE_URL,
         iat: new Date().toISOString(),
         exp: new Date(Date.now() + 60_000).toISOString(),
       },
@@ -501,7 +451,7 @@ describe("paseto plugin: /verify-paseto", () => {
     );
 
     const res = await localAuth.handler(
-      new Request("https://test.example.com/api/auth/verify-paseto", {
+      new Request(`${BASE_URL}/api/auth/verify-paseto`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token: wrongIssuerToken }),
