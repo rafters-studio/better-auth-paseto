@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       paseto-ts:
-        specifier: ^1.6.0
-        version: 1.6.1
+        specifier: ^2.0.6
+        version: 2.0.6
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -52,8 +52,8 @@ importers:
         specifier: ^4.6.0
         version: 4.12.21
       paseto-ts:
-        specifier: ^1.6.0
-        version: 1.6.1
+        specifier: ^2.0.6
+        version: 2.0.6
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -941,8 +941,8 @@ packages:
       oxlint-tsgolint:
         optional: true
 
-  paseto-ts@1.6.1:
-    resolution: {integrity: sha512-47JTvYt5NWHv6Cev2s6tdf6tN/ySJ6QtFKOjU/sl/G63q8zw25vdoDyOdCJWLwtGEi6XUp+gz+6/uN7y2k3Lcg==}
+  paseto-ts@2.0.6:
+    resolution: {integrity: sha512-Ul3AzoCcS4uA6jF+GW2zYUxZY78xsqCbfxdv2Khk/30hDxAzcvsWQjp4uW1XcbkrO9zNrPbdBv4HiXgJigWLVA==}
 
   pathe@1.1.2:
     resolution: {integrity: sha512-whLdWMYL2TwI08hn8/ZqAbrVemu0LNaNNJZX73O6qaIdCTfXutsLhMkjdENX0qhsQ9uIimo4/aQOmXkoon2nDQ==}
@@ -1689,7 +1689,7 @@ snapshots:
       '@oxlint/binding-win32-ia32-msvc': 1.66.0
       '@oxlint/binding-win32-x64-msvc': 1.66.0
 
-  paseto-ts@1.6.1:
+  paseto-ts@2.0.6:
     dependencies:
       '@stablelib/blake2b': 2.0.1
       '@stablelib/ed25519': 2.1.0

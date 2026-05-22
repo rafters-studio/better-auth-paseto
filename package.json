@@ -43,7 +43,7 @@
   },
   "homepage": "https://github.com/rafters-studio/better-auth-paseto",
   "dependencies": {
-    "paseto-ts": "^1.6.0",
+    "paseto-ts": "^2.0.6",
     "zod": "^4.4.3"
   },
   "peerDependencies": {
