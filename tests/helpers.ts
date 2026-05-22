@@ -3,9 +3,9 @@ import { memoryAdapter } from "better-auth/adapters/memory";
 import { paseto } from "../src/index";
 
 /**
- * Shared test-only helpers. Used by tests/plugin.test.ts and
- * tests/verify-extras.test.ts to spin up better-auth instances with
- * a known-state paseto_keys table.
+ * Shared test-only helpers. Used across every test file to spin up
+ * better-auth instances, drive sign-up + cookie flows, and round-trip
+ * tokens through the verify endpoint.
  */
 
 export const BASE_URL = "https://test.example.com";
@@ -68,4 +68,73 @@ export function makeAuthWithSeededKeys(
       }),
     ],
   });
+}
+
+/**
+ * Build a better-auth instance with an empty paseto_keys table. The
+ * plugin's init hook seeds the first key when the handler chain runs.
+ */
+export function makeAuth(extraOptions?: Parameters<typeof paseto>[0]) {
+  return betterAuth({
+    baseURL: BASE_URL,
+    secret: "test-secret-that-is-at-least-32-chars-long",
+    database: memoryAdapter(freshDb()),
+    emailAndPassword: { enabled: true },
+    plugins: [
+      paseto({
+        paseto: {
+          issuer: BASE_URL,
+          audience: BASE_URL,
+          expirationTime: "15m",
+        },
+        ...extraOptions,
+      }),
+    ],
+  });
+}
+
+/**
+ * Sign up a user via /sign-up/email and return the set-cookie header.
+ * Throws if sign-up did not return one so callers never proceed with a
+ * missing cookie.
+ */
+export async function signUpAndGetCookie(
+  auth: ReturnType<typeof makeAuth>,
+  email = "alice@example.com",
+): Promise<string> {
+  const res = await auth.handler(
+    new Request(`${BASE_URL}/api/auth/sign-up/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email,
+        password: "correct-horse-battery-staple",
+        name: "Alice",
+      }),
+    }),
+  );
+  const cookie = res.headers.get("set-cookie");
+  if (!cookie) {
+    throw new Error(`sign-up did not return a cookie (status ${res.status})`);
+  }
+  return cookie;
+}
+
+/**
+ * Round-trip a token through /verify-paseto and return the `payload`
+ * field (null on rejection, payload object on success).
+ */
+export async function verifyVia(
+  auth: ReturnType<typeof makeAuth>,
+  token: string,
+): Promise<unknown> {
+  const res = await auth.handler(
+    new Request(`${BASE_URL}/api/auth/verify-paseto`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ token }),
+    }),
+  );
+  const body = await res.json();
+  return body.payload;
 }

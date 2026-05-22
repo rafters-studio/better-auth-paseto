@@ -1,7 +1,24 @@
-import type { GenericEndpointContext } from "@better-auth/core";
+import type {
+  BetterAuthOptions,
+  GenericEndpointContext,
+} from "@better-auth/core";
+import type { DBAdapter } from "@better-auth/core/db/adapter";
+import type { SecretConfig } from "@better-auth/core";
 import { symmetricEncrypt } from "better-auth/crypto";
 import { getPasetoKeysAdapter } from "./adapter";
 import type { PasetoKey, PasetoOptions } from "./types";
+
+/**
+ * The minimum context shape `createPasetoKey` and `ensureFreshKey` need.
+ * Accepts either a `GenericEndpointContext` (use `ctx.context`) or a
+ * better-auth `AuthContext` passed from the plugin `init` hook. The
+ * narrow shape lets the same helper run from request handlers and from
+ * server-startup init without synthesising fake contexts.
+ */
+export interface KeyOpContext {
+  adapter: DBAdapter<BetterAuthOptions>;
+  secretConfig: string | SecretConfig;
+}
 
 /**
  * Convert a duration spec to an absolute exp claim (ISO-8601 string).
@@ -65,10 +82,23 @@ export async function generateExportedKeyPair() {
   return { publicWebKey, privateWebKey };
 }
 
-/** Create and store a new keypair. */
+/**
+ * Create and store a new keypair.
+ *
+ * `ctx` is the narrow shape -- caller decides whether to pass a
+ * `GenericEndpointContext`'s `.context` (request handler path) or a
+ * better-auth `AuthContext` directly (plugin init path).
+ *
+ * `requestCtx` is only needed when `options.adapter.createKey` is set
+ * (the user-supplied adapter override needs the request context to pass
+ * through to whatever external store they wired up). Calls from init,
+ * where no request exists, will throw if a user adapter is configured
+ * -- those installations must seed their first key out-of-band.
+ */
 export async function createPasetoKey(
-  ctx: GenericEndpointContext,
+  ctx: KeyOpContext,
   options?: PasetoOptions,
+  requestCtx?: GenericEndpointContext,
 ): Promise<PasetoKey> {
   const { publicWebKey, privateWebKey } = await generateExportedKeyPair();
   const stringifiedPrivate = JSON.stringify(privateWebKey);
@@ -79,7 +109,7 @@ export async function createPasetoKey(
     privateKey: encryptionOn
       ? JSON.stringify(
           await symmetricEncrypt({
-            key: ctx.context.secretConfig,
+            key: ctx.secretConfig,
             data: stringifiedPrivate,
           }),
         )
@@ -94,8 +124,66 @@ export async function createPasetoKey(
       : {}),
   };
 
-  const adapter = getPasetoKeysAdapter(ctx.context.adapter, options);
-  return await adapter.createKey(ctx, key);
+  const adapter = getPasetoKeysAdapter(ctx.adapter, options);
+  return await adapter.createKey(key, requestCtx);
+}
+
+/**
+ * Per-plugin-instance async mutex for key creation. Keyed by adapter
+ * identity so each better-auth instance gets its own slot. Within a
+ * single Node / Worker / Bun instance this collapses N concurrent
+ * createPasetoKey calls into one DB write. Across instances the race
+ * remains and may briefly produce duplicate rows -- documented in the
+ * README under "Key rotation under load."
+ */
+const keyCreateInFlight = new WeakMap<object, Promise<PasetoKey>>();
+
+/**
+ * Ensure a fresh, non-expired key exists for signing. If one already
+ * does, returns it. If not, creates one -- collapsing concurrent
+ * callers behind a shared promise so the table does not gain duplicate
+ * rows during burst traffic.
+ *
+ * The mutex re-checks the latest key on entry: another in-flight
+ * creation may have already satisfied the need by the time this caller
+ * acquired the lock.
+ */
+export async function ensureFreshKey(
+  ctx: KeyOpContext,
+  options?: PasetoOptions,
+  requestCtx?: GenericEndpointContext,
+): Promise<PasetoKey> {
+  const adapterKey = ctx.adapter as unknown as object;
+  const existing = keyCreateInFlight.get(adapterKey);
+  if (existing) return existing;
+
+  const promise = (async (): Promise<PasetoKey> => {
+    // Re-check via adapter directly. The custom-adapter path (when
+    // options.adapter.getKeys is configured) cannot re-check without a
+    // request context, so skip the optimisation and just create.
+    if (!options?.adapter?.getKeys) {
+      const latest = await ctx.adapter.findMany<PasetoKey>({
+        model: "paseto_keys",
+        sortBy: { field: "createdAt", direction: "desc" },
+        limit: 1,
+      });
+      const latestKey = latest?.[0];
+      if (
+        latestKey &&
+        (!latestKey.expiresAt || latestKey.expiresAt >= new Date())
+      ) {
+        return latestKey;
+      }
+    }
+    return createPasetoKey(ctx, options, requestCtx);
+  })();
+
+  keyCreateInFlight.set(adapterKey, promise);
+  try {
+    return await promise;
+  } finally {
+    keyCreateInFlight.delete(adapterKey);
+  }
 }
 
 /**
