@@ -81,6 +81,16 @@ export interface PasetoOptions {
      * find the matching public key.
      */
     sign?: (payload: PasetoClaims) => Awaitable<string>;
+    /**
+     * Clock skew tolerance in seconds, applied symmetrically to the
+     * `exp` and `nbf` checks during verification. A token whose `exp`
+     * is within `clockSkew` seconds in the past still verifies; a
+     * token whose `nbf` is within `clockSkew` seconds in the future
+     * still verifies. Set to 0 for strict comparison.
+     *
+     * Default: 60 seconds.
+     */
+    clockSkew?: number;
   };
 
   /**
@@ -121,3 +131,32 @@ export interface PasetoKey {
   createdAt: Date;
   expiresAt?: Date;
 }
+
+/**
+ * Structured reason a verify call failed. The HTTP `/verify-paseto`
+ * endpoint deliberately collapses every failure into `{ payload: null }`
+ * so the wire never leaks why a token was rejected. Server-side code
+ * that wants to log or branch on the reason uses `verifyPasetoWithReason`
+ * which surfaces this shape.
+ */
+export type PasetoVerifyErrorKind =
+  | "expired"
+  | "not_yet_valid"
+  | "invalid_signature"
+  | "wrong_issuer"
+  | "wrong_audience"
+  | "missing_kid"
+  | "unknown_kid"
+  | "malformed";
+
+export interface PasetoVerifyError {
+  kind: PasetoVerifyErrorKind;
+  message: string;
+}
+
+export type PasetoVerifyResult<T extends PasetoClaims = PasetoClaims> =
+  | {
+      ok: true;
+      payload: T & Required<Pick<PasetoClaims, "sub" | "aud">>;
+    }
+  | { ok: false; error: PasetoVerifyError };
