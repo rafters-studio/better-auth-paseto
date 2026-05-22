@@ -12,13 +12,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["20", "22"]
+        # Matches release.yml's Node 24.12 floor (npm 11.5+ required for
+        # OIDC trusted publishing) and aligns with @types/node 25 in
+        # devDeps. Older Node here typechecks against the newer @types
+        # and surfaces API drift that does not exist in production.
+        node: ["24", "25"]
     steps:
       - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          # Match the @rafters/mail repo. pnpm 11 made build-script
+          # execution strict (ERR_PNPM_IGNORED_BUILDS even with
+          # onlyBuiltDependencies set); pnpm 10.25 reads the same
+          # lockfile + respects onlyBuiltDependencies without that
+          # behaviour. Mail's CI is the canonical reference.
+          version: 10.25.0
 
       - uses: actions/setup-node@v6
         with:
