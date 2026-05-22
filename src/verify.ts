@@ -13,6 +13,15 @@ import { jwkToPasetoPublicKey } from "./utils";
  * if valid or null otherwise.
  *
  * iss/aud claims are checked against the plugin options (baseURL by default).
+ *
+ * Context requirement: this helper resolves the active better-auth context
+ * via `getCurrentAuthContext()`, which is populated by the request handler
+ * chain. Calling `verifyPaseto` outside of a better-auth request scope
+ * (e.g. from a standalone script, a background job started without a
+ * request, or another framework's handler) will throw because no context
+ * is available. Verifiers running outside better-auth should fetch
+ * `/paseto-keys` and call a PASETO library directly instead -- that path
+ * is what the JWKS-shaped endpoint exists for.
  */
 export async function verifyPaseto<T extends PasetoClaims = PasetoClaims>(
   token: string,

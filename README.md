@@ -1,6 +1,6 @@
-# @rafters-studio/better-auth-paseto
+# @rafters/better-auth-paseto
 
-PASETO v4.public plugin for [better-auth](https://better-auth.com). Drop-in shape-compatible replacement for better-auth's built-in JWT plugin.
+PASETO v4.public plugin for [better-auth](https://better-auth.com). Shape-compatible replacement for better-auth's built-in JWT plugin, with safer defaults on the two POST endpoints (see [Differences from the JWT plugin](#differences-from-the-jwt-plugin)).
 
 ## Why
 
@@ -15,16 +15,16 @@ PASETO (Platform-Agnostic Security Tokens) closes the holes. v4.public is the as
 ## Install
 
 ```sh
-pnpm add @rafters-studio/better-auth-paseto
+pnpm add @rafters/better-auth-paseto
 ```
 
-Peer dependency: `better-auth >= 1.0.0`.
+Peer dependencies: `better-auth >= 1.6.0`, `@better-auth/core >= 1.6.0`.
 
 ## Usage
 
 ```ts
 import { betterAuth } from "better-auth";
-import { paseto } from "@rafters-studio/better-auth-paseto";
+import { paseto } from "@rafters/better-auth-paseto";
 
 export const auth = betterAuth({
   baseURL: "https://app.example.com",
@@ -43,12 +43,12 @@ export const auth = betterAuth({
 
 That registers four endpoints (paths are relative to better-auth's base):
 
-| Endpoint           | Method | Purpose                                                        |
-| ------------------ | ------ | -------------------------------------------------------------- |
-| `/paseto-keys`     | GET    | Public-key set, JWKS-shaped for interop                        |
-| `/token`           | GET    | Mint a PASETO derived from the active session                  |
-| `/sign-paseto`     | POST   | Sign an arbitrary claims payload                               |
-| `/verify-paseto`   | POST   | Verify a token and return its payload (or null)                |
+| Endpoint         | Method | Auth     | Purpose                                                                                |
+| ---------------- | ------ | -------- | -------------------------------------------------------------------------------------- |
+| `/paseto-keys`   | GET    | public   | Public-key set, JWKS-shaped for interop                                                |
+| `/token`         | GET    | session  | Mint a session-derived PASETO                                                          |
+| `/sign-paseto`   | POST   | session  | Mint a session-derived PASETO with caller-supplied **supplementary** claims            |
+| `/verify-paseto` | POST   | public   | Verify a token against the configured issuer/audience; return payload or null          |
 
 And one response hook: `/get-session` responses gain a `set-auth-paseto` header carrying a session-derived token, mirroring the JWT plugin's `set-auth-jwt` behavior.
 
@@ -83,14 +83,33 @@ Set `keys.rotationInterval` to a number of seconds. The plugin marks each new ke
 
 If you want to rotate manually instead, set no `rotationInterval` and call `createPasetoKey(ctx, options)` from your own code when you want a fresh key.
 
-## Migration from the JWT plugin
+## Differences from the JWT plugin
 
-The plugin shape is intentionally identical: same endpoints, same hooks, same options layout under different names. To migrate:
+The endpoint surface mirrors the JWT plugin so existing consumers can switch with minimal churn. The two POST endpoints deliberately deviate on defaults the JWT plugin inherited from a more permissive era:
+
+### `/sign-paseto` is session-only and ignores security-relevant caller claims
+
+The PASETO plugin requires an authenticated session on `/sign-paseto` and treats the request body's `payload` as **supplementary application-level claims only**. The security-relevant claims are always sourced from server state:
+
+- `sub` from the session (via `paseto.getSubject` or `user.id`)
+- `iss`, `aud`, `exp` from plugin options (or the `baseURL` default)
+- `iat` from the current server time
+
+If the caller puts `sub`, `iss`, `aud`, `iat`, or `exp` into `payload`, those values are stripped before signing. Custom claims like `role`, `tier`, `org`, etc. pass through.
+
+The `overrideOptions` body field that exists on the JWT plugin's `/sign-jwt` is not implemented here. Signer options (issuer, expiry, signing key, etc.) are server configuration, not request input.
+
+### `/verify-paseto` does not let the caller pick the issuer
+
+Claim expectations (`iss`, `aud`) come from plugin options. A verifier endpoint that lets the caller pick what to expect cannot meaningfully enforce the iss check, so the request body field is omitted.
+
+### Migration steps
 
 1. Install this plugin alongside the JWT plugin.
 2. Switch your verification path to read `set-auth-paseto` instead of `set-auth-jwt`.
-3. Switch your verifiers to fetch `/paseto-keys` and use a PASETO library.
-4. Remove the JWT plugin once your last issued JWT has expired.
+3. Switch your verifiers to fetch `/paseto-keys` and use a PASETO library (preferred), or hit `/verify-paseto`.
+4. If you were calling `/sign-jwt` with arbitrary `sub` values, refactor to use the session-derived `/token` endpoint or call `signPaseto` from server-side code (the helper is exported).
+5. Remove the JWT plugin once your last issued JWT has expired.
 
 The two plugins coexist cleanly -- they use separate tables (`jwks` vs `paseto_keys`) and separate response headers.
 
@@ -103,6 +122,17 @@ The plugin stores Ed25519 keypairs as JWK JSON (`{kty:"OKP", crv:"Ed25519", x, d
 
 PASETO sign/verify use raw byte keys; the plugin extracts those from the JWK at call time. The cost is negligible (microseconds).
 
+## Calling `signPaseto` directly
+
+The `signPaseto` helper is exported for server-side code that wants to mint a token without going through the HTTP endpoint. A couple of `paseto-ts` quirks to know about if you build payloads yourself:
+
+- `paseto-ts` defaults `addIat: true` and `addExp: true` on `sign`, which **overwrite** explicit `iat`/`exp` claims in your payload unless you also pass `{ addIat: false, addExp: false }`. The plugin's helper sets `iat` explicitly and lets `paseto-ts`'s `addExp` fill in `exp` from plugin options -- if you call `signPaseto` with your own `exp`, expect the library to overwrite it unless you opt out.
+- `paseto-ts`'s `verify` does not enforce `exp` rejection by default; the plugin's `verifyPaseto` wrapper layers that check on top. If you call the raw library directly, do your own expiry enforcement.
+
+## Standalone verification
+
+The exported `verifyPaseto` helper resolves the active better-auth context via `getCurrentAuthContext()` and only works inside a better-auth request scope. To verify tokens from outside better-auth (background jobs, other frameworks, cross-language services), fetch `/paseto-keys` and call a PASETO library directly -- the JWKS-shaped endpoint exists for exactly this case.
+
 ## What this plugin is NOT
 
 - **Not a PASETO v4.local provider.** Symmetric session encryption is a separate concern; v0.1 is v4.public only. Adding v4.local is a clean extension if needed.
@@ -111,7 +141,7 @@ PASETO sign/verify use raw byte keys; the plugin extracts those from the JWK at 
 
 ## Status
 
-v0.1 draft. Tested against `paseto-ts` v1.6. Dogfooded in [smugglr](https://github.com/rafters-studio/smugglr) and [fence](https://github.com/rafters-studio/) (private). Issues and PRs welcome.
+v0.1 draft. Tested against `paseto-ts` v1.6. Maintained by the platform team at Rafters Studio. Issues and PRs welcome.
 
 ## License
 

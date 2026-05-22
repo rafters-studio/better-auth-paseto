@@ -1,6 +1,6 @@
 {
-  "name": "@rafters-studio/better-auth-paseto",
-  "version": "0.1.0",
+  "name": "@rafters/better-auth-paseto",
+  "version": "0.1.1",
   "description": "PASETO v4.public plugin for better-auth. Drop-in replacement for the JWT plugin with no algorithm-confusion attack surface.",
   "type": "module",
   "main": "./dist/index.js",

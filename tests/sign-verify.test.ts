@@ -85,13 +85,19 @@ describe("PASETO v4.public sign/verify roundtrip", () => {
       iat: new Date().toISOString(),
       exp: new Date(Date.now() + 60_000).toISOString(),
     });
-    // Flip a character in the payload segment.
+    // Mutate a character in the MIDDLE of the payload segment. The signature
+    // is the last 64 bytes (~86 base64url chars), so mutating ~40 chars from
+    // the end reliably lands inside the signature. Flipping the last char
+    // alone is flaky because length-of-payload changes with iat/exp string
+    // length, which shifts whether the trailing bits are signature or padding.
     const parts = token.split(".");
     const payloadSeg = parts[2]!;
-    const flipped =
-      payloadSeg.slice(0, -1) +
-      (payloadSeg.slice(-1) === "A" ? "B" : "A");
-    const tampered = [parts[0], parts[1], flipped].join(".");
+    const idx = Math.max(0, payloadSeg.length - 40);
+    const orig = payloadSeg[idx]!;
+    const swap = orig === "A" ? "B" : "A";
+    const mutated =
+      payloadSeg.slice(0, idx) + swap + payloadSeg.slice(idx + 1);
+    const tampered = [parts[0], parts[1], mutated].join(".");
     expect(() => pasetoVerify(pub, tampered)).toThrow();
   });
 
