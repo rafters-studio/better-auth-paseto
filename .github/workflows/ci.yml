@@ -12,13 +12,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["20", "22"]
+        # Matches release.yml's Node 24.12 floor (npm 11.5+ required for
+        # OIDC trusted publishing) and aligns with @types/node 25 in
+        # devDeps. Older Node here typechecks against the newer @types
+        # and surfaces API drift that does not exist in production.
+        node: ["24", "25"]
     steps:
       - uses: actions/checkout@v6
 
       - uses: pnpm/action-setup@v6
         with:
-          version: 9
+          # Match local development. The lockfile was last touched by
+          # pnpm 11; pnpm 9 fails ERR_PNPM_LOCKFILE_MISSING_DEPENDENCY
+          # on peer-dep permutations the newer format records.
+          version: 11
 
       - uses: actions/setup-node@v6
         with:
