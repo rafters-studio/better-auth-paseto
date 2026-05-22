@@ -17,7 +17,7 @@ import { verifyPaseto as verifyPasetoHelper } from "./verify";
 export { signPaseto } from "./sign";
 export type * from "./types";
 export { createPasetoKey, generateExportedKeyPair, toExpPaseto } from "./utils";
-export { verifyPaseto } from "./verify";
+export { verifyPaseto, verifyPasetoWithReason } from "./verify";
 
 declare module "@better-auth/core" {
   // TypeScript requires merged interface declarations to use the same
@@ -80,6 +80,25 @@ export const paseto = <O extends PasetoOptions>(
   return {
     id: "paseto",
     options: options as NoInfer<O>,
+    /**
+     * Probe Web Crypto for Ed25519 support during better-auth instance
+     * construction. If the runtime cannot generate Ed25519 keys (Node
+     * <20, Cloudflare Workers without nodejs_compat in older runtimes,
+     * older Bun), every sign call would later fail with a cryptic Web
+     * Crypto error. Failing here points the operator at the actual
+     * cause before any traffic flows.
+     */
+    init: async () => {
+      try {
+        await crypto.subtle.generateKey("Ed25519", false, ["sign", "verify"]);
+      } catch (err) {
+        throw new BetterAuthError(
+          "@rafters/better-auth-paseto requires Web Crypto Ed25519 support. " +
+            "Verified runtimes: Node 20+, Cloudflare Workers, Bun >= 1.1.0. " +
+            `Underlying error: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    },
     endpoints: {
       /**
        * Public-key set. JWKS-shaped on the wire because Ed25519 keys are

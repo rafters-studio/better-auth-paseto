@@ -5,3 +5,5 @@ dist/
 .env
 .env.local
 coverage/
+# SCIP indexer output (sourcegraph / claude-code workspace artifact)
+index.scip

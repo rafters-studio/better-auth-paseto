@@ -70,6 +70,7 @@ interface PasetoOptions {
     issuer?: string;               // defaults to baseURL origin
     audience?: string | string[];  // defaults to baseURL origin
     expirationTime?: number | string | Date;  // e.g. "15m", "1h", "7d", or absolute
+    clockSkew?: number;            // seconds; tolerance on exp/nbf checks. Default: 60
     definePayload?: (session) => Record<string, any>;  // shape the session-derived payload
     getSubject?: (session) => string;  // override sub claim (default: user.id)
     sign?: (payload) => Promise<string>;  // custom/remote signer (requires keys.remoteUrl)
@@ -132,9 +133,53 @@ The `signPaseto` helper is exported for server-side code that wants to mint a to
 - `paseto-ts` defaults `addIat: true` and `addExp: true` on `sign`, which **overwrite** explicit `iat`/`exp` claims in your payload unless you also pass `{ addIat: false, addExp: false }`. The plugin's helper sets `iat` explicitly and lets `paseto-ts`'s `addExp` fill in `exp` from plugin options -- if you call `signPaseto` with your own `exp`, expect the library to overwrite it unless you opt out.
 - `paseto-ts`'s `verify` does not enforce `exp` rejection by default; the plugin's `verifyPaseto` wrapper layers that check on top. If you call the raw library directly, do your own expiry enforcement.
 
+## Structured verify errors
+
+The HTTP `/verify-paseto` endpoint always returns `{ payload: null }` on failure -- the wire never leaks why a token was rejected. Server-side code that wants to log or branch on the reason should use `verifyPasetoWithReason`:
+
+```ts
+import { verifyPasetoWithReason } from "@rafters/better-auth-paseto";
+
+const result = await verifyPasetoWithReason(token);
+if (result.ok) {
+  console.log("verified", result.payload);
+} else {
+  switch (result.error.kind) {
+    case "expired":           /* renew */ break;
+    case "not_yet_valid":     /* nbf in future */ break;
+    case "invalid_signature": /* bad sig */ break;
+    case "wrong_issuer":      /* iss mismatch */ break;
+    case "wrong_audience":    /* aud mismatch */ break;
+    case "missing_kid":       /* footer has no kid */ break;
+    case "unknown_kid":       /* kid not in /paseto-keys */ break;
+    case "malformed":         /* not parseable as v4.public */ break;
+  }
+}
+```
+
+Same context requirement as `verifyPaseto` -- both call `getCurrentAuthContext()` and require a better-auth request scope.
+
+## Clock skew
+
+`options.paseto.clockSkew` (seconds, default 60) applies symmetrically to `exp` and `nbf` during verification. A token whose `exp` is within `clockSkew` seconds in the past still verifies; a token whose `nbf` is within `clockSkew` seconds in the future still verifies. Set to `0` to disable tolerance.
+
+Distributed deployments routinely see a few seconds of clock drift between signer and verifier. 60s is conservative for most setups; tighten or loosen to suit your monitoring story.
+
+The plugin passes `validatePayload: false` to `paseto-ts`'s `verify` so its built-in claim checks do not run -- `paseto-ts` does not support skew and a future-`nbf` token with a 60s skew would otherwise be rejected by the library before the plugin's skew logic could run. The plugin owns iss/aud/exp/nbf validation end-to-end.
+
+## Runtime requirement
+
+The plugin probes Web Crypto Ed25519 once during better-auth's plugin `init` phase. Verified runtimes:
+
+- Node 20+
+- Cloudflare Workers
+- Bun >= 1.1.0
+
+Older or non-conforming runtimes raise a `BetterAuthError` at init naming the requirement, instead of failing cryptically on the first sign call.
+
 ## Standalone verification
 
-The exported `verifyPaseto` helper resolves the active better-auth context via `getCurrentAuthContext()` and only works inside a better-auth request scope. To verify tokens from outside better-auth (background jobs, other frameworks, cross-language services), fetch `/paseto-keys` and call a PASETO library directly -- the JWKS-shaped endpoint exists for exactly this case.
+The exported `verifyPaseto` and `verifyPasetoWithReason` helpers resolve the active better-auth context via `getCurrentAuthContext()` and only work inside a better-auth request scope. To verify tokens from outside better-auth (background jobs, other frameworks, cross-language services), fetch `/paseto-keys` and call a PASETO library directly -- the JWKS-shaped endpoint exists for exactly this case.
 
 ## What this plugin is NOT
 

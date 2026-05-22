@@ -8,6 +8,7 @@ import {
   generateExportedKeyPair,
   jwkToPasetoSecretKey,
 } from "../src/utils";
+import { BASE_URL, freshDb, makeAuthWithSeededKeys } from "./helpers";
 
 /**
  * Spin up a real better-auth instance with the paseto plugin against an
@@ -17,7 +18,6 @@ import {
  */
 
 const ED25519_SIG_BYTES = 64;
-const BASE_URL = "https://test.example.com";
 
 /**
  * Decode the PASETO v4.public payload without verification. Format:
@@ -34,65 +34,6 @@ function decodePasetoPayload(token: string): Record<string, unknown> {
   const bytes = base64UrlDecode(parts[2]!);
   const payloadBytes = bytes.slice(0, bytes.length - ED25519_SIG_BYTES);
   return JSON.parse(new TextDecoder().decode(payloadBytes));
-}
-
-function freshDb(): Record<string, any[]> {
-  return {
-    user: [],
-    session: [],
-    account: [],
-    verification: [],
-    paseto_keys: [],
-  };
-}
-
-interface SeededKey {
-  id: string;
-  publicKey: object;
-  privateKey: object;
-  createdAt?: Date;
-  expiresAt?: Date;
-}
-
-/**
- * Build a better-auth instance pre-loaded with known keypairs in the
- * paseto_keys table. Used to drive verification-side tests against tokens
- * we want to construct ourselves (expired, wrong-issuer, footer-rebased).
- *
- * `disablePrivateKeyEncryption: true` matches how the seeded rows are
- * persisted -- raw JWK JSON, no symmetric wrap -- so the plugin's decrypt
- * step does not run on them.
- */
-function makeAuthWithSeededKeys(
-  keys: SeededKey[],
-  extraOptions?: Parameters<typeof paseto>[0],
-) {
-  const db: Record<string, any[]> = {
-    ...freshDb(),
-    paseto_keys: keys.map((k) => ({
-      id: k.id,
-      publicKey: JSON.stringify(k.publicKey),
-      privateKey: JSON.stringify(k.privateKey),
-      createdAt: k.createdAt ?? new Date(),
-      ...(k.expiresAt ? { expiresAt: k.expiresAt } : {}),
-    })),
-  };
-  return betterAuth({
-    baseURL: BASE_URL,
-    secret: "test-secret-that-is-at-least-32-chars-long",
-    database: memoryAdapter(db),
-    emailAndPassword: { enabled: true },
-    plugins: [
-      paseto({
-        keys: { disablePrivateKeyEncryption: true },
-        paseto: {
-          issuer: BASE_URL,
-          audience: BASE_URL,
-        },
-        ...extraOptions,
-      }),
-    ],
-  });
 }
 
 function makeAuth(extraOptions?: Parameters<typeof paseto>[0]) {
